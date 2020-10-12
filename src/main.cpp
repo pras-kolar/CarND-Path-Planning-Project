@@ -15,7 +15,10 @@ using std::string;
 using std::vector;
 
 
-
+bool laneCheck(unsigned low, unsigned high, unsigned x)
+{
+  return (low <= x && x <= high);
+}
 int main() {
   uWS::Hub h;
 
@@ -26,7 +29,7 @@ int main() {
   vector<double> map_waypoints_dx;
   vector<double> map_waypoints_dy;
 
-  // Waypoint map to read from
+  // Waypoint map to read from data file
   string map_file_ = "../data/highway_map.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
@@ -53,17 +56,21 @@ int main() {
     map_waypoints_dx.push_back(d_x);
     map_waypoints_dy.push_back(d_y);
   }
-
+// Initialize the lane, reference velocity, Acceleration limit and speed difference
+int lane = 1;
+double ref_vel = 37;
+double speed_diff = .224;
+const double max_accel = 35.5;  
+/*
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
+               */
+    h.onMessage([&max_accel, &speed_diff, &ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
-
-int lane = 1;
-double ref_vel = 49;
                 
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 
@@ -103,46 +110,68 @@ double ref_vel = 49;
           car_s = end_path_s;
           }
           bool too_close = false;
+          bool too_close_ahead = false;
+          bool too_close_behind = false;
+          bool car_left = false;
+          bool car_right = false;
+          bool car_ahead = false;
           
           //find ref_v to use
           for (int i = 0; i< sensor_fusion.size(); i++){
           	//other car is in my present lane
             float d = sensor_fusion[i][6]; // d gives which lane the car is in
-            if (d < (2+4* lane +2) && d > (2+4*lane-2)){
-            	double vx = sensor_fusion[i][3];
-                double vy = sensor_fusion[i][4];
-                double check_speed = sqrt(vx*vx+vy*vy);
-                double check_car_s = sensor_fusion[i][5];
-                
-                check_car_s += ((double)prev_size*0.02*check_speed);
-                //check if s values are greater s gap and my present values
-                if((check_car_s > car_s) && ((check_car_s-car_s) < 30)){
-                  //ref_vel = 10.5;
-                  too_close = true;
-                  /*
-                  if (lane > 1){
-                    lane = 1;
-                  }
-                  else if (lane == 1){
-                    lane = 0;
-                  }
-                  */
-                }
+            int current_car_lane;
+            
+            if (laneCheck(0,4,d)){
+              current_car_lane = 0;
             }
-          }
-          
-          if (too_close){
-            //std::cout << "Too Close" << std::endl;
-            ref_vel -= 0.224; // Need to tweak this
-            if (lane > 1){
-              lane = 1;
+            else if(laneCheck(4,8,d)){
+              current_car_lane = 1;
             }
-            else if (lane == 1){
-              lane = 0;
+            else if(laneCheck(8,12,d)){
+              current_car_lane = 2;
+            }            
+            
+            //            if (d < (2+4* lane +2) && d > (2+4*lane-2)){   //Code as per course introduction video
+            double vx = sensor_fusion[i][3];
+            double vy = sensor_fusion[i][4];
+            double check_speed = sqrt(vx*vx+vy*vy);
+            double check_car_s = sensor_fusion[i][5];
+
+            check_car_s += ((double)prev_size*0.02*check_speed);
+            //check if s values are greater s gap and my present values
+            // To check the distance of the car in front, right and left
+            /* 
+            *  Code to take collision mitigation action based on occurrence of cars
+            *  in current land and other lanes
+            */
+            if (current_car_lane == lane){
+              car_ahead |= check_car_s > car_s && (check_car_s - car_s) < 40;
             }
-          }
-          else if(ref_vel < 49.5){ // Value may need tweaking
-            ref_vel += 0.224;
+            else if ((current_car_lane-lane) == 1){
+              car_right |= (car_s+40) > check_car_s  && (car_s-40) < check_car_s;
+            }
+            else if ((current_car_lane-lane) == -1){
+              car_left |= (car_s+40) > check_car_s && (car_s-40) < check_car_s;
+            }
+            
+            if (car_ahead){
+              if (!car_left && lane > 0){
+                lane --;
+              }
+              else if(!car_left && lane != 2){
+                lane ++;
+              }
+              else if(!car_right && lane != 2){
+                lane ++;
+              }
+              else {
+                ref_vel -= speed_diff;
+              }
+            }
+            else if(ref_vel < max_accel){
+              ref_vel += speed_diff;
+            }            
           }
 
           vector<double> ptsx;
@@ -186,8 +215,6 @@ double ref_vel = 49;
           ptsy.push_back(next_wp1[1]);
           ptsy.push_back(next_wp2[1]);
           
-
-          
           for (int i=0; i<ptsx.size();i++){
             double shift_x = ptsx[i]-ref_x;
             double shift_y = ptsy[i]-ref_y;
@@ -213,22 +240,7 @@ double ref_vel = 49;
           /**
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
-           */
-          /*
-          double dist_inc = 0.25;
-          for (int i=0; i<50 ; i++)
-          {
-            double next_s = car_s+(i+1)*dist_inc;
-            double next_d = 6;
-            
-            vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            //next_x_vals.push_back(car_x+(dist_inc*i)*cos(deg2rad(car_yaw)));
-            //next_y_vals.push_back(car_y+(dist_inc*i)*sin(deg2rad(car_yaw)));
-            next_x_vals.push_back(xy[0]);
-            next_y_vals.push_back(xy[1]);
-          }
-          */
-          
+           */         
           
           double target_x = 30.0;
           double target_y = s(target_x);
