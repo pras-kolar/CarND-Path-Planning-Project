@@ -58,15 +58,10 @@ int main() {
   }
 // Initialize the lane, reference velocity, Acceleration limit and speed difference
 int lane = 1;
-double ref_vel = 37;
+double ref_vel = 34;
 double speed_diff = .224;
-const double max_accel = 35.5;  
-/*
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-               &map_waypoints_dx,&map_waypoints_dy]
-              (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
-               uWS::OpCode opCode) {
-               */
+const double max_accel = 32;  
+
     h.onMessage([&max_accel, &speed_diff, &ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -145,6 +140,7 @@ const double max_accel = 35.5;
             *  Code to take collision mitigation action based on occurrence of cars
             *  in current land and other lanes
             */
+            // Input from Mentor was incorporated with some slight modifications
             if (current_car_lane == lane){
               car_ahead |= check_car_s > car_s && (check_car_s - car_s) < 40;
             }
